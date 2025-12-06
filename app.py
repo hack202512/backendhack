@@ -56,4 +56,13 @@ app.add_middleware(
 
 @app.get("/")
 async def read_root():
-    return {""}
+    return {"status": "ok"}
+
+@app.get("/test-cookies")
+async def test_cookies(request: Request):
+    cookies = dict(request.cookies)
+    return {
+        "cookies_received": cookies,
+        "has_access_token": "access_token" in cookies,
+        "has_refresh_token": "refresh_token" in cookies,
+    }

@@ -74,33 +74,50 @@ def login_user(payload: LoginRequest, response: Response, db: Session = Depends(
     db_url = os.getenv("DATABASE_URL", "")
     is_production = db_url and "localhost" not in db_url and "127.0.0.1" not in db_url
     
-    cookie_kwargs = {
-        "httponly": True,
-        "path": "/",
-    }
-    
     if is_production:
-        cookie_kwargs["samesite"] = "none"
-        cookie_kwargs["secure"] = True
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            secure=True,
+            samesite="none",
+            path="/",
+            max_age=int(access_expires.total_seconds()),
+        )
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            httponly=True,
+            secure=True,
+            samesite="none",
+            path="/",
+            max_age=int(refresh_expires.total_seconds()),
+        )
     else:
-        cookie_kwargs["samesite"] = "lax"
-        cookie_kwargs["secure"] = False
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            secure=False,
+            samesite="lax",
+            path="/",
+            max_age=int(access_expires.total_seconds()),
+        )
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            httponly=True,
+            secure=False,
+            samesite="lax",
+            path="/",
+            max_age=int(refresh_expires.total_seconds()),
+        )
+
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        max_age=int(access_expires.total_seconds()),
-        **cookie_kwargs
-    )
-
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        max_age=int(refresh_expires.total_seconds()),
-        **cookie_kwargs
-    )
-
-    return {"detail": "Logged in successfully"}
+    return {"detail": "Logged in successfully", "ok": True}
 
 
 @router.get("/me")
@@ -162,24 +179,26 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
         db_url = os.getenv("DATABASE_URL", "")
         is_production = db_url and "localhost" not in db_url and "127.0.0.1" not in db_url
         
-        cookie_kwargs = {
-            "httponly": True,
-            "path": "/",
-        }
-        
         if is_production:
-            cookie_kwargs["samesite"] = "none"
-            cookie_kwargs["secure"] = True
+            response.set_cookie(
+                key="access_token",
+                value=access_token,
+                httponly=True,
+                secure=True,
+                samesite="none",
+                path="/",
+                max_age=int(access_expires.total_seconds()),
+            )
         else:
-            cookie_kwargs["samesite"] = "lax"
-            cookie_kwargs["secure"] = False
-        
-        response.set_cookie(
-            key="access_token",
-            value=access_token,
-            max_age=int(access_expires.total_seconds()),
-            **cookie_kwargs
-        )
+            response.set_cookie(
+                key="access_token",
+                value=access_token,
+                httponly=True,
+                secure=False,
+                samesite="lax",
+                path="/",
+                max_age=int(access_expires.total_seconds()),
+            )
         
         return {"detail": "Token refreshed successfully"}
     except Exception as e:
@@ -194,17 +213,36 @@ def logout_user(response: Response):
     db_url = os.getenv("DATABASE_URL", "")
     is_production = db_url and "localhost" not in db_url and "127.0.0.1" not in db_url
     
-    response.delete_cookie(
-        key="access_token",
-        path="/",
-        samesite="none" if is_production else "lax",
-        secure=is_production,
-    )
-    response.delete_cookie(
-        key="refresh_token",
-        path="/",
-        samesite="none" if is_production else "lax",
-        secure=is_production,
-    )
+    if is_production:
+        response.delete_cookie(
+            key="access_token",
+            path="/",
+            samesite="none",
+            secure=True,
+        )
+        response.delete_cookie(
+            key="refresh_token",
+            path="/",
+            samesite="none",
+            secure=True,
+        )
+    else:
+        response.delete_cookie(
+            key="access_token",
+            path="/",
+            samesite="lax",
+            secure=False,
+        )
+        response.delete_cookie(
+            key="refresh_token",
+            path="/",
+            samesite="lax",
+            secure=False,
+        )
+    
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    
     return {"detail": "Logged out successfully"}
 
