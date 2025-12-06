@@ -26,9 +26,7 @@ COPY . .
 # RUN useradd -m appuser
 # USER appuser
 
-# 9. Port – Railway ustawia PORT w env, ale dobrze mieć default
-ENV PORT=8000
-
-# 10. Komenda startowa – FastAPI przez Uvicorn
+# 9. Komenda startowa – FastAPI przez Uvicorn
+# Railway automatycznie ustawia zmienną PORT, używamy jej z fallbackiem na 8000 dla lokalnego dev
 # Aplikacja jest w app.py z obiektem `app = FastAPI()`
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port 8000"]
