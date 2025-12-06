@@ -30,5 +30,5 @@ COPY . .
 ENV PORT=8000
 
 # 10. Komenda startowa – FastAPI przez Uvicorn
-# Jeśli twoja aplikacja to app/main.py z obiektem `app = FastAPI()`
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+# Aplikacja jest w app.py z obiektem `app = FastAPI()`
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT}"]
