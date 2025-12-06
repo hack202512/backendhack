@@ -13,11 +13,20 @@ from schemas.found_item_form import FoundItemFormRequest, FoundItemFormResponse
 
 try:
     import openpyxl
-except ImportError:  # pragma: no cover
+    from openpyxl.styles import Font, Alignment, PatternFill
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.table import Table, TableStyleInfo
+except ImportError:
     openpyxl = None
 
 
 router = APIRouter(prefix="/found-item-forms", tags=["found-item-forms"])
+
+
+def _naive(dt):
+    if dt and getattr(dt, "tzinfo", None):
+        return dt.replace(tzinfo=None)
+    return dt
 
 
 def require_user(
@@ -115,7 +124,7 @@ def list_my_found_items(
 
 @router.get("/export")
 def export_my_forms(
-    format: str = Query("excel", pattern="^(excel|json|csv)$"),
+    format: str = Query("xlsx", pattern="^(xlsx|excel|json|csv)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_user),
 ):
@@ -128,20 +137,32 @@ def export_my_forms(
     )
     mapped = [to_form_response(i) for i in items]
 
-
+    # --- CSV ---
     if format == "csv":
         import csv
         from io import StringIO
 
+        def _fmt_dt(dt):
+            if not dt:
+                return ""
+            try:
+                return dt.replace(microsecond=0).isoformat()
+            except Exception:
+                return str(dt)
+
         output = StringIO()
-        writer = csv.writer(output)
+        writer = csv.writer(
+            output,
+            delimiter=";",
+            quoting=csv.QUOTE_MINIMAL,
+        )
 
         writer.writerow([
-            "id",
-            "item_name",
-            "found_location",
-            "found_date",
-            "created_at",
+            "ID",
+            "Nazwa",
+            "Lokalizacja",
+            "Data znalezienia",
+            "Utworzono",
         ])
 
         for m in mapped:
@@ -150,11 +171,13 @@ def export_my_forms(
                 m.item_name,
                 m.found_location or "",
                 m.found_date.isoformat() if m.found_date else "",
-                m.created_at.isoformat() if m.created_at else "",
+                _fmt_dt(m.created_at),
             ])
 
-        csv_bytes = output.getvalue().encode("utf-8")
+        csv_text = output.getvalue()
         output.close()
+
+        csv_bytes = ("\ufeff" + csv_text).encode("utf-8")
 
         headers = {"Content-Disposition": "attachment; filename=found_items.csv"}
         return StreamingResponse(
@@ -163,6 +186,7 @@ def export_my_forms(
             headers=headers,
         )
 
+    # --- JSON ---
     elif format == "json":
         import json
 
@@ -180,8 +204,13 @@ def export_my_forms(
 
         buf = BytesIO(json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
         headers = {"Content-Disposition": "attachment; filename=found_items.json"}
-        return StreamingResponse(buf, media_type="application/json", headers=headers)
+        return StreamingResponse(
+            buf,
+            media_type="application/json",
+            headers=headers,
+        )
 
+    # --- XLSX/EXCEL ---
     if openpyxl is None:
         raise HTTPException(500, detail="openpyxl not installed. Add it to requirements.")
 
@@ -189,7 +218,7 @@ def export_my_forms(
     ws = wb.active
     ws.title = "Found items"
 
-    ws.append([
+    headers_row = [
         "ID",
         "Item name",
         "Color",
@@ -197,7 +226,8 @@ def export_my_forms(
         "Found location",
         "Found date",
         "Created at",
-    ])
+    ]
+    ws.append(headers_row)
 
     for m in mapped:
         ws.append([
@@ -206,9 +236,59 @@ def export_my_forms(
             m.item_color,
             m.item_brand,
             m.found_location,
-            m.found_date.isoformat() if m.found_date else None,
-            m.created_at.isoformat() if m.created_at else None,
+            m.found_date,
+            _naive(m.created_at),
         ])
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="4F81BD")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+
+    ws.row_dimensions[1].height = 22
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+
+    table = Table(displayName="FoundItemsTable", ref=ws.dimensions)
+    table.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium9",
+        showFirstColumn=False,
+        showLastColumn=False,
+        showRowStripes=True,
+        showColumnStripes=False,
+    )
+    ws.add_table(table)
+
+    header_index = {cell.value: cell.column for cell in ws[1]}
+    found_date_col = header_index.get("Found date")
+    created_at_col = header_index.get("Created at")
+
+    if found_date_col:
+        for row in ws.iter_rows(min_row=2, min_col=found_date_col, max_col=found_date_col):
+            for cell in row:
+                if cell.value:
+                    cell.number_format = "yyyy-mm-dd"
+
+    if created_at_col:
+        for row in ws.iter_rows(min_row=2, min_col=created_at_col, max_col=created_at_col):
+            for cell in row:
+                if cell.value:
+                    cell.number_format = "yyyy-mm-dd hh:mm"
+
+    for col_idx, col_cells in enumerate(ws.columns, start=1):
+        max_len = 0
+        for c in col_cells:
+            v = c.value
+            if v is None:
+                continue
+            s = v.isoformat() if hasattr(v, "isoformat") else str(v)
+            max_len = max(max_len, len(s))
+
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max(12, max_len + 2), 50)
 
     stream = BytesIO()
     wb.save(stream)
