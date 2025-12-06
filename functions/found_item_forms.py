@@ -1,11 +1,11 @@
 from typing import List
 from io import BytesIO
 from datetime import datetime, time
-
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-
+from models.models import RegistryCounter, CountyOffice
 from context.db import get_db
 from functions.auth import get_current_user_token
 from models.models import FoundItem, User
@@ -28,6 +28,29 @@ def _naive(dt):
         return dt.replace(tzinfo=None)
     return dt
 
+def next_registry_number(db: Session, office: CountyOffice, dt: datetime | None = None) -> str:
+    dt = dt or datetime.utcnow()
+    year = dt.year
+
+    counter = (
+        db.query(RegistryCounter)
+        .filter_by(county_office_id=office.id, year=year)
+        .with_for_update()
+        .first()
+    )
+
+    if not counter:
+        counter = RegistryCounter(county_office_id=office.id, year=year, value=0)
+        db.add(counter)
+        db.flush()
+
+    counter.value += 1
+    seq = counter.value
+
+    yy = str(year)[-2:]
+    code = (office.code or "XX").upper()
+
+    return f"RZ{yy}{code}{seq:04d}"
 
 def require_user(
     token_data: dict = Depends(get_current_user_token),
@@ -50,15 +73,15 @@ def to_form_response(i: FoundItem) -> FoundItemFormResponse:
         created_at = datetime.now(timezone.utc)
 
     found_date = getattr(i, "found_date", None)
-    found_date_date = found_date.date() if found_date else None
 
     return FoundItemFormResponse(
         id=str(getattr(i, "id")),
+        registry_number=getattr(i, "registry_number", None),
         item_name=getattr(i, "item_name", "") or getattr(i, "name", "") or "",
         item_color=getattr(i, "item_color", None),
         item_brand=getattr(i, "item_brand", None),
         found_location=getattr(i, "found_location", None),
-        found_date=found_date_date,
+        found_date=found_date,
         found_time=getattr(i, "found_time", None),
         circumstances=getattr(i, "circumstances", None),
         found_by_firstname=getattr(i, "found_by_firstname", None),
@@ -68,18 +91,37 @@ def to_form_response(i: FoundItem) -> FoundItemFormResponse:
     )
 
 
+def _fmt_found(dt):
+    if not dt:
+        return ""
+    try:
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(dt)
+
 @router.post("/", response_model=FoundItemFormResponse, status_code=201)
 def add_found_item(
     payload: FoundItemFormRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_user),
 ):
+    if not hasattr(FoundItem, "county_office_id") or not hasattr(FoundItem, "registry_number"):
+        raise HTTPException(500, detail="Model FoundItem missing county_office_id/registry_number fields")
+    if not hasattr(User, "county_offices"):
+        raise HTTPException(500, detail="Model User missing county_offices relation")
+    if not hasattr(CountyOffice, "code"):
+        raise HTTPException(500, detail="Model CountyOffice missing code field")
+
+    office = current_user.county_offices[0] if current_user.county_offices else None
+    if not office:
+        raise HTTPException(400, detail="User has no county office assigned")
+
     item = FoundItem()
 
     item.item_name = payload.item_name.strip()
-    item.item_color = payload.item_color.strip() if payload.item_color and payload.item_color.strip() else None
-    item.item_brand = payload.item_brand.strip() if payload.item_brand and payload.item_brand.strip() else None
-    item.found_location = payload.found_location.strip()
+    item.item_color = payload.item_color.strip() if payload.item_color else None
+    item.item_brand = payload.item_brand.strip() if payload.item_brand else None
+    item.found_location = payload.found_location.strip() if payload.found_location else None
 
     if payload.found_time:
         try:
@@ -95,7 +137,16 @@ def add_found_item(
     item.found_by_firstname = payload.found_by_firstname.strip() if payload.found_by_firstname else None
     item.found_by_lastname = payload.found_by_lastname.strip() if payload.found_by_lastname else None
     item.found_by_phonenumber = payload.found_by_phonenumber.strip() if payload.found_by_phonenumber else None
+
     item.user_id = current_user.id
+
+    item.county_office_id = office.id
+
+    try:
+        item.registry_number = next_registry_number(db, office)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, detail=f"Failed to generate registry number: {e}")
 
     db.add(item)
     db.commit()
@@ -137,7 +188,6 @@ def export_my_forms(
     )
     mapped = [to_form_response(i) for i in items]
 
-    # --- CSV ---
     if format == "csv":
         import csv
         from io import StringIO
@@ -159,6 +209,7 @@ def export_my_forms(
 
         writer.writerow([
             "ID",
+            "Numer ewidencyjny",
             "Nazwa",
             "Lokalizacja",
             "Data znalezienia",
@@ -168,9 +219,10 @@ def export_my_forms(
         for m in mapped:
             writer.writerow([
                 m.id,
+                getattr(m, "registry_number", None) or "",
                 m.item_name,
                 m.found_location or "",
-                m.found_date.isoformat() if m.found_date else "",
+                _fmt_found(m.found_date),
                 _fmt_dt(m.created_at),
             ])
 
@@ -186,7 +238,6 @@ def export_my_forms(
             headers=headers,
         )
 
-    # --- JSON ---
     elif format == "json":
         import json
 
@@ -194,6 +245,7 @@ def export_my_forms(
         for m in mapped:
             data.append({
                 "id": m.id,
+                "registry_number": getattr(m, "registry_number", None),
                 "item_name": m.item_name,
                 "item_color": m.item_color,
                 "item_brand": m.item_brand,
@@ -210,7 +262,6 @@ def export_my_forms(
             headers=headers,
         )
 
-    # --- XLSX/EXCEL ---
     if openpyxl is None:
         raise HTTPException(500, detail="openpyxl not installed. Add it to requirements.")
 
@@ -220,6 +271,7 @@ def export_my_forms(
 
     headers_row = [
         "ID",
+        "Registry number",
         "Item name",
         "Color",
         "Brand",
@@ -227,11 +279,13 @@ def export_my_forms(
         "Found date",
         "Created at",
     ]
+
     ws.append(headers_row)
 
     for m in mapped:
         ws.append([
             m.id,
+            getattr(m, "registry_number", None),
             m.item_name,
             m.item_color,
             m.item_brand,
@@ -239,6 +293,7 @@ def export_my_forms(
             m.found_date,
             _naive(m.created_at),
         ])
+
 
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill("solid", fgColor="4F81BD")
@@ -271,7 +326,7 @@ def export_my_forms(
         for row in ws.iter_rows(min_row=2, min_col=found_date_col, max_col=found_date_col):
             for cell in row:
                 if cell.value:
-                    cell.number_format = "yyyy-mm-dd"
+                    cell.number_format = "yyyy-mm-dd hh:mm"
 
     if created_at_col:
         for row in ws.iter_rows(min_row=2, min_col=created_at_col, max_col=created_at_col):
@@ -308,9 +363,14 @@ def get_found_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_user),
 ):
+    try:
+        item_uuid = uuid.UUID(item_id)
+    except ValueError:
+        raise HTTPException(400, detail="Invalid item_id")
+
     item = (
         db.query(FoundItem)
-        .filter(FoundItem.id == item_id, FoundItem.user_id == current_user.id)
+        .filter(FoundItem.id == item_uuid, FoundItem.user_id == current_user.id)
         .first()
     )
     if not item:
