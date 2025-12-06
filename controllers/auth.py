@@ -1,4 +1,5 @@
 from datetime import timedelta
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from sqlalchemy.orm import Session
@@ -71,13 +72,20 @@ def login_user(payload: LoginRequest, response: Response, db: Session = Depends(
         expires_delta=refresh_expires,
     )
 
+    # Dla produkcji (HTTPS) używamy secure=True i samesite="none"
+    # Dla localhost używamy secure=False i samesite="lax"
+    # Sprawdzamy czy jesteśmy na produkcji - jeśli DATABASE_URL nie zawiera localhost, to produkcja
+    db_url = os.getenv("DATABASE_URL", "")
+    is_production = db_url and "localhost" not in db_url and "127.0.0.1" not in db_url
+    
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
         max_age=int(access_expires.total_seconds()),
-        samesite="lax",
-        secure=False,
+        samesite="none" if is_production else "lax",
+        secure=is_production,
+        path="/",
     )
 
     response.set_cookie(
@@ -85,8 +93,9 @@ def login_user(payload: LoginRequest, response: Response, db: Session = Depends(
         value=refresh_token,
         httponly=True,
         max_age=int(refresh_expires.total_seconds()),
-        samesite="lax",
-        secure=False,
+        samesite="none" if is_production else "lax",
+        secure=is_production,
+        path="/",
     )
 
     return {"detail": "Logged in successfully"}
@@ -115,15 +124,20 @@ def get_current_user(
 
 @router.post("/logout")
 def logout_user(response: Response):
+    db_url = os.getenv("DATABASE_URL", "")
+    is_production = db_url and "localhost" not in db_url and "127.0.0.1" not in db_url
+    
     response.delete_cookie(
         key="access_token",
         path="/",
-        samesite="lax",
+        samesite="none" if is_production else "lax",
+        secure=is_production,
     )
     response.delete_cookie(
         key="refresh_token",
         path="/",
-        samesite="lax",
+        samesite="none" if is_production else "lax",
+        secure=is_production,
     )
     return {"detail": "Logged out successfully"}
 
