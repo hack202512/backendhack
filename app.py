@@ -37,10 +37,8 @@ allowed_origins = [
 default_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://localhost:3000/",
-    "http://127.0.0.1:3000/",
-    "frontendhack-eta.vercel.app",
-    "frontendhack-eta.vercel.app/"
+    "https://frontendhack-eta.vercel.app",
+    "https://frontendhack-eta.vercel.app/",
 ]
 
 all_origins = list(set(allowed_origins + default_origins))
