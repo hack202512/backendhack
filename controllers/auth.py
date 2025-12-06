@@ -12,7 +12,6 @@ from context.db import get_db
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 def get_user_role(user: User) -> str:
-    """Get user role, defaulting to 'user' if role doesn't exist"""
     if hasattr(user, 'role') and user.role:
         return user.role.value if hasattr(user.role, "value") else str(user.role)
     return "user"
@@ -57,8 +56,8 @@ def login_user(payload: LoginRequest, response: Response, db: Session = Depends(
             detail="Invalid email or password",
         )
 
-    access_expires = timedelta(minutes=15)
-    refresh_expires = timedelta(days=7)
+    access_expires = timedelta(hours=2)
+    refresh_expires = timedelta(hours=10)
 
     token_data = {
         "sub": user.email,
@@ -72,9 +71,6 @@ def login_user(payload: LoginRequest, response: Response, db: Session = Depends(
         expires_delta=refresh_expires,
     )
 
-    # Dla produkcji (HTTPS) używamy secure=True i samesite="none"
-    # Dla localhost używamy secure=False i samesite="lax"
-    # Sprawdzamy czy jesteśmy na produkcji - jeśli DATABASE_URL nie zawiera localhost, to produkcja
     db_url = os.getenv("DATABASE_URL", "")
     is_production = db_url and "localhost" not in db_url and "127.0.0.1" not in db_url
     
@@ -120,6 +116,62 @@ def get_current_user(
         email=user.email,
         role=get_user_role(user),
     )
+
+
+@router.post("/refresh")
+def refresh_token(request: Request, response: Response, db: Session = Depends(get_db)):
+    refresh_token_value = request.cookies.get("refresh_token")
+    if not refresh_token_value:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token not found",
+        )
+    
+    try:
+        from functions.auth import decode_access_token
+        payload = decode_access_token(refresh_token_value)
+        
+        if payload.get("type") != "refresh":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token type",
+            )
+        
+        user = db.query(User).filter(User.id == payload.get("user_id")).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+        
+        access_expires = timedelta(hours=2)
+        token_data = {
+            "sub": user.email,
+            "user_id": user.id,
+            "role": get_user_role(user),
+        }
+        
+        access_token = create_access_token(token_data, expires_delta=access_expires)
+        
+        db_url = os.getenv("DATABASE_URL", "")
+        is_production = db_url and "localhost" not in db_url and "127.0.0.1" not in db_url
+        
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            max_age=int(access_expires.total_seconds()),
+            samesite="none" if is_production else "lax",
+            secure=is_production,
+            path="/",
+        )
+        
+        return {"detail": "Token refreshed successfully"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
 
 
 @router.post("/logout")

@@ -77,8 +77,8 @@ def add_found_item(
     item = FoundItem()
 
     item.item_name = payload.item_name.strip()
-    item.item_color = payload.item_color.strip() if payload.item_color else None
-    item.item_brand = payload.item_brand.strip() if payload.item_brand else None
+    item.item_color = payload.item_color.strip() if payload.item_color and payload.item_color.strip() else None
+    item.item_brand = payload.item_brand.strip() if payload.item_brand and payload.item_brand.strip() else None
     item.found_location = payload.found_location.strip()
 
     if payload.found_time:

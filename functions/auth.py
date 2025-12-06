@@ -46,7 +46,14 @@ def decode_access_token(token: str) -> dict[str, Any]:
 
 def get_current_user_token(request: Request) -> dict[str, Any]:
     token = request.cookies.get("access_token")
+    
     if not token:
+        refresh_token_value = request.cookies.get("refresh_token")
+        if refresh_token_value:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Access token expired, refresh needed",
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
@@ -56,6 +63,12 @@ def get_current_user_token(request: Request) -> dict[str, Any]:
         payload = decode_access_token(token)
         return payload
     except JWTError:
+        refresh_token_value = request.cookies.get("refresh_token")
+        if refresh_token_value:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Access token expired, refresh needed",
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
