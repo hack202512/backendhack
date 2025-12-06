@@ -74,24 +74,30 @@ def login_user(payload: LoginRequest, response: Response, db: Session = Depends(
     db_url = os.getenv("DATABASE_URL", "")
     is_production = db_url and "localhost" not in db_url and "127.0.0.1" not in db_url
     
+    cookie_kwargs = {
+        "httponly": True,
+        "path": "/",
+    }
+    
+    if is_production:
+        cookie_kwargs["samesite"] = "none"
+        cookie_kwargs["secure"] = True
+    else:
+        cookie_kwargs["samesite"] = "lax"
+        cookie_kwargs["secure"] = False
+    
     response.set_cookie(
         key="access_token",
         value=access_token,
-        httponly=True,
         max_age=int(access_expires.total_seconds()),
-        samesite="none" if is_production else "lax",
-        secure=is_production,
-        path="/",
+        **cookie_kwargs
     )
 
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
-        httponly=True,
         max_age=int(refresh_expires.total_seconds()),
-        samesite="none" if is_production else "lax",
-        secure=is_production,
-        path="/",
+        **cookie_kwargs
     )
 
     return {"detail": "Logged in successfully"}
@@ -156,14 +162,23 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
         db_url = os.getenv("DATABASE_URL", "")
         is_production = db_url and "localhost" not in db_url and "127.0.0.1" not in db_url
         
+        cookie_kwargs = {
+            "httponly": True,
+            "path": "/",
+        }
+        
+        if is_production:
+            cookie_kwargs["samesite"] = "none"
+            cookie_kwargs["secure"] = True
+        else:
+            cookie_kwargs["samesite"] = "lax"
+            cookie_kwargs["secure"] = False
+        
         response.set_cookie(
             key="access_token",
             value=access_token,
-            httponly=True,
             max_age=int(access_expires.total_seconds()),
-            samesite="none" if is_production else "lax",
-            secure=is_production,
-            path="/",
+            **cookie_kwargs
         )
         
         return {"detail": "Token refreshed successfully"}
