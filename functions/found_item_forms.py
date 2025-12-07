@@ -2,7 +2,7 @@ from typing import List
 from io import BytesIO
 from datetime import datetime, time
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from models.models import RegistryCounter, CountyOffice

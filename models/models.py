@@ -99,18 +99,22 @@ class CountyOffice(Base):
         index=True,
     )
 
-    county_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("counties.id", ondelete="SET NULL"),
+    voivodeship_name: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    voivodeship_code: Mapped[Optional[str]] = mapped_column(
+        String(4),
         nullable=True,
         index=True,
     )
 
-    county: Mapped[Optional["County"]] = relationship(
-        "County",
-        back_populates="county_offices",
+    county_code: Mapped[Optional[str]] = mapped_column(
+        String(6),
+        nullable=True,
+        index=True,
     )
-
 class FoundItem(Base):
     __tablename__ = "found_items"
 
@@ -223,77 +227,3 @@ class RegistryCounter(Base):
         UniqueConstraint("county_office_id", "year", name="uq_registry_counter_office_year"),
     )
 
-class Voivodeship(Base):
-    __tablename__ = "voivodeships"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4
-    )
-
-    name: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-        unique=True
-    )
-
-    # krótki kod do numeracji/identyfikacji, np. "MA", "MZ"
-    code: Mapped[str] = mapped_column(
-        String(4),
-        nullable=False,
-        unique=True,
-        index=True
-    )
-
-    counties: Mapped[List["County"]] = relationship(
-        "County",
-        back_populates="voivodeship",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
-
-
-class County(Base):
-    __tablename__ = "counties"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4
-    )
-
-    name: Mapped[str] = mapped_column(
-        String(120),
-        nullable=False
-    )
-
-    # kod powiatu (Twój wewnętrzny), np. "KR", "WA", itd.
-    code: Mapped[str] = mapped_column(
-        String(6),
-        nullable=False,
-        index=True
-    )
-
-    voivodeship_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("voivodeships.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
-    )
-
-    voivodeship: Mapped["Voivodeship"] = relationship(
-        "Voivodeship",
-        back_populates="counties",
-    )
-
-    county_offices: Mapped[List["CountyOffice"]] = relationship(
-        "CountyOffice",
-        back_populates="county",
-        cascade="all",
-        passive_deletes=True,
-    )
-
-    __table_args__ = (
-        UniqueConstraint("voivodeship_id", "code", name="uq_county_voiv_code"),
-    )

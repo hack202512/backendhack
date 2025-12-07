@@ -30,10 +30,7 @@ class FoundItemFormResponse(BaseModel):
     item_color: Optional[str] = None
     item_brand: Optional[str] = None
     found_location: Optional[str] = None
-
-    # zamiast date
     found_date: Optional[datetime] = None
-
     found_time: Optional[str] = None
     circumstances: Optional[str] = None
     found_by_firstname: Optional[str] = None
