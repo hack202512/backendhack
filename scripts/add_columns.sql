@@ -7,3 +7,4 @@ ADD COLUMN IF NOT EXISTS found_time VARCHAR(5);
 ALTER TABLE found_items 
 ADD COLUMN IF NOT EXISTS circumstances VARCHAR(500);
 
+
